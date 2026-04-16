@@ -75,6 +75,8 @@ std::string format_timelapse_file_size_b_kb_mb(std::uint64_t bytes)
 
 namespace pt = boost::property_tree;
 std::vector<QDSDevice::Filament> QDSDevice::m_general_filamentConfig;
+std::vector<std::string> QDSDevice::m_general_vendorNames;
+std::vector<std::string> QDSDevice::m_general_colorHexByIndex;
 bool QDSDevice::m_is_init_general = false;
 std::mutex QDSDevice::m_general_mtx;
 
@@ -130,6 +132,8 @@ QDSDevice::QDSDevice(const std::string dev_id, const std::string& dev_name, cons
     
     QDSDevice::initGeneralData();
     m_filamentConfig = m_general_filamentConfig;
+    m_vendorNames = m_general_vendorNames;
+    m_colorHexByIndex = m_general_colorHexByIndex;
 }
 
 void QDSDevice::updateByJsonData(json& status)
@@ -260,14 +264,14 @@ void QDSDevice::updateBoxDataByJson(const json status)
 			m_boxData[i].type = m_filamentConfig[filamentIndex].type;
 		}
 		int vendorIndx = getJsonCurStageToInt(saveVariables, "vendor_" + serial);
-		if (vendorIndx != -1) {
-			m_boxData[i].vendor = m_filamentConfig[vendorIndx].vendor;
+		if (vendorIndx != -1 && vendorIndx < (int)m_vendorNames.size()) {
+			m_boxData[i].vendor = m_vendorNames[vendorIndx];
+			m_boxData[i].vendor_index = vendorIndx;
 		}
 
 		int colorIndex = getJsonCurStageToInt(saveVariables, "color_" + serial);
-		if (colorIndex != -1) {
-			m_boxData[i].colorHexCode = m_filamentConfig[colorIndex].colorHexCode;
-
+		if (colorIndex != -1 && colorIndex < (int)m_colorHexByIndex.size()) {
+			m_boxData[i].colorHexCode = m_colorHexByIndex[colorIndex];
 		}
 		if (i < 16) {
             std::string box_stepper = "box_stepper " + serial;
@@ -348,10 +352,8 @@ void QDSDevice::updateBoxDataByJson(const json status)
             filament_type[i] = m_boxData[i].type;
             filament_colors[i] = m_boxData[i].colorHexCode;
 
-            std::string slot_vendor = m_boxData[i].vendor;
-
             std::string test_type = mapping[m_type];
-            std::string test_vendor = slot_vendor == "QIDI" ? "1" : "0";
+            std::string test_vendor = std::to_string(m_boxData[i].vendor_index);
             std::string tset_idx = std::to_string(m_boxData[i].filament_idex);
             std::string test_id = "QD_" + test_type + "_" +  test_vendor + "_" + tset_idx;
             filament_id[i] = test_id;
@@ -455,10 +457,10 @@ void QDSDevice::updateFilamentConfig()
 				m_filamentConfig[i].maxTemp = maxTemps[i];
 				m_filamentConfig[i].boxMinTemp = boxMinTemps[i];
 				m_filamentConfig[i].boxMaxTemp = boxMaxTemps[i];
-
-				m_filamentConfig[i].vendor = vendors[i];
-				m_filamentConfig[i].colorHexCode = colorHexCodes[i];
             }
+            // Store vendor_list and colordict in dedicated arrays
+            m_vendorNames = vendors;
+            m_colorHexByIndex = colorHexCodes;
             m_is_init_filamentConfig = true;
 
         }
@@ -533,6 +535,8 @@ void QDSDevice::initGeneralData()
 	}
 
     QDSDevice::m_general_filamentConfig.resize(100);
+    QDSDevice::m_general_vendorNames.resize(100);
+    QDSDevice::m_general_colorHexByIndex.resize(100);
     std::string cfg_path = Slic3r::resources_dir() + "/profiles/officiall_filas_list.cfg";
 	pt::ptree pt;
 	try {
@@ -547,13 +551,13 @@ void QDSDevice::initGeneralData()
         if (sectionName == "colordict") {
             for (const auto& item : section.second) {
                 int index = std::stoi(item.first);
-                m_general_filamentConfig[index].colorHexCode = item.second.data();
+                m_general_colorHexByIndex[index] = item.second.data();
             }
         }
 		if (sectionName == "vendor_list") {
 			for (const auto& item : section.second) {
 				int index = std::stoi(item.first);
-				m_general_filamentConfig[index].vendor = item.second.data();
+				m_general_vendorNames[index] = item.second.data();
 			}
 		}
 
@@ -1970,8 +1974,6 @@ void QDSDeviceManager::upBoxInfoToBoxMsg(std::shared_ptr<QDSDevice>& device){
                 filament_type[i] = device->m_boxData[i].type;
                 filament_colors[i] = device->m_boxData[i].colorHexCode;
                 
-                std::string slot_vendor = device->m_boxData[i].vendor;
-
                 std::string test_type = "";
 
                 auto it = std::find_if(mapping.begin(), mapping.end(),
@@ -1983,7 +1985,7 @@ void QDSDeviceManager::upBoxInfoToBoxMsg(std::shared_ptr<QDSDevice>& device){
                     test_type = it->second;
                 }
 
-                std::string test_vendor = slot_vendor == "QIDI" ? "1" : "0";
+                std::string test_vendor = std::to_string(device->m_boxData[i].vendor_index);
                 std::string tset_idx = std::to_string(device->m_boxData[i].filament_idex);
                 std::string test_id = "QD_" + test_type + "_" +  test_vendor + "_" + tset_idx;
                 filament_id[i] = test_id;

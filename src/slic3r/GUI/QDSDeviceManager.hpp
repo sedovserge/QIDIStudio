@@ -62,6 +62,7 @@ public:
     struct Filament {
         bool hasMaterial{ false };
         int filament_idex;
+        int vendor_index{ 0 };      // vendor ID from RFID/save_variables
         std::string name;
         std::string vendor;
         std::string colorHexCode;
@@ -157,6 +158,10 @@ public:
     int m_box_count{ 0 };
     std::vector<Filament> m_filamentConfig;
     static std::vector<Filament> m_general_filamentConfig;
+    std::vector<std::string> m_vendorNames;         // vendor_list: index -> vendor name
+    std::vector<std::string> m_colorHexByIndex;     // colordict: index -> hex color
+    static std::vector<std::string> m_general_vendorNames;
+    static std::vector<std::string> m_general_colorHexByIndex;
     bool m_auto_read_rfid{ false };
     bool m_init_detect{ false };
     bool m_auto_reload_detect{ false };
