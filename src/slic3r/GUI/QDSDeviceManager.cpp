@@ -799,20 +799,20 @@ void QDSDevice::updateBoxDataByJson(const json status)
 	for (int i = 0; i < 17; ++i) {
 		std::string serial = "slot" + std::to_string(i);
 		int filamentIndex = getJsonCurStageToInt(saveVariables, "filament_" + serial);
-		if (filamentIndex != -1) {
+		if (filamentIndex != -1 && filamentIndex < (int)m_filamentConfig.size()) {
             m_boxData[i].filament_idex = filamentIndex;
 			m_boxData[i].name = m_filamentConfig[filamentIndex].name;
 			m_boxData[i].type = m_filamentConfig[filamentIndex].type;
 		}
 		int vendorIndx = getJsonCurStageToInt(saveVariables, "vendor_" + serial);
-		if (vendorIndx != -1) {
-			m_boxData[i].vendor = m_filamentConfig[vendorIndx].vendor;
+		if (vendorIndx != -1 && vendorIndx < (int)m_vendorNames.size()) {
+			m_boxData[i].vendor = m_vendorNames[vendorIndx];
+			m_boxData[i].vendor_index = vendorIndx;
 		}
 
 		int colorIndex = getJsonCurStageToInt(saveVariables, "color_" + serial);
-		if (colorIndex != -1) {
-			m_boxData[i].colorHexCode = m_filamentConfig[colorIndex].colorHexCode;
-
+		if (colorIndex != -1 && colorIndex < (int)m_colorHexByIndex.size()) {
+			m_boxData[i].colorHexCode = m_colorHexByIndex[colorIndex];
 		}
 		if (i < 16) {
             std::string box_stepper = "box_stepper " + serial;
@@ -899,8 +899,6 @@ void QDSDevice::updateBoxDataByJson(const json status)
             filament_type[i] = m_boxData[i].type;
             filament_colors[i] = m_boxData[i].colorHexCode;
 
-            std::string slot_vendor = m_boxData[i].vendor;
-
             //y83
             std::string test_type = "";
             auto it = std::find_if(mapping.begin(), mapping.end(),
@@ -912,7 +910,7 @@ void QDSDevice::updateBoxDataByJson(const json status)
                 test_type = it->second;
             }
 
-            std::string test_vendor = slot_vendor == "QIDI" ? "1" : "0";
+            std::string test_vendor = std::to_string(m_boxData[i].vendor_index);
             std::string tset_idx = std::to_string(m_boxData[i].filament_idex);
             std::string test_id = "QD_" + test_type + "_" +  test_vendor + "_" + tset_idx;
             filament_id[i] = test_id;
@@ -1025,6 +1023,9 @@ void QDSDevice::updateFilamentConfig()
                     m_filamentConfig[i].vendor      = vendors[i];
                     m_filamentConfig[i].colorHexCode= colorHexCodes[i];
                 }
+                // Store vendor_list and colordict in dedicated arrays
+                m_vendorNames = vendors;
+                m_colorHexByIndex = colorHexCodes;
                 m_is_init_filamentConfig = true;
 
                 // Flush any save_variables that were queued while config was loading.
@@ -2782,8 +2783,6 @@ void QDSDeviceManager::upBoxInfoToBoxMsg(std::shared_ptr<QDSDevice>& device){
                 filament_type[i] = device->m_boxData[i].type;
                 filament_colors[i] = device->m_boxData[i].colorHexCode;
                 
-                std::string slot_vendor = device->m_boxData[i].vendor;
-
                 std::string test_type = "";
 
                 auto it = std::find_if(mapping.begin(), mapping.end(),
@@ -2795,7 +2794,7 @@ void QDSDeviceManager::upBoxInfoToBoxMsg(std::shared_ptr<QDSDevice>& device){
                     test_type = it->second;
                 }
 
-                std::string test_vendor = slot_vendor == "QIDI" ? "1" : "0";
+                std::string test_vendor = std::to_string(device->m_boxData[i].vendor_index);
                 std::string tset_idx = std::to_string(device->m_boxData[i].filament_idex);
                 std::string test_id = "QD_" + test_type + "_" +  test_vendor + "_" + tset_idx;
                 filament_id[i] = test_id;

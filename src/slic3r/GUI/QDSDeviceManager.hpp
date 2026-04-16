@@ -149,6 +149,7 @@ public:
     struct Filament {
         bool hasMaterial{ false };
         int filament_idex;
+        int vendor_index{ 0 };      // vendor ID from RFID/save_variables
         std::string name;
         std::string vendor;
         std::string colorHexCode;
@@ -264,6 +265,8 @@ public:
     std::string m_cur_slot;            // 当前使用的槽，第一个槽为 slot-0  第四个为slot-3
     int m_box_count{ 0 };              // 当前盒子的数量
     std::vector<Filament> m_filamentConfig; // 所有的数据，index是filament的编号
+    std::vector<std::string> m_vendorNames;         // vendor_list: index -> vendor name
+    std::vector<std::string> m_colorHexByIndex;     // colordict: index -> hex color
     bool m_auto_read_rfid{ false };             // 插入时自动更新
     bool m_init_detect{ false };                // 开机时检测
     bool m_auto_reload_detect{ false };         // 自动续料
