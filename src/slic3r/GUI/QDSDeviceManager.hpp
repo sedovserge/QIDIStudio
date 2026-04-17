@@ -167,6 +167,7 @@ public:
 	void updateByJsonData(const json& status);
     bool is_online();
     void updateFilamentConfig();    //When "m_frp_url" is updated, update the config file.
+    void refreshFilamentConfig();   //Force re-download of filament config from printer Moonraker.
 
     void updateBoxDataByJson(const json status);
     std::vector<float> getNozzleDiameter();
@@ -302,7 +303,7 @@ public:
     std::vector<TimelapseFileInfo> timelapse_file_info {};
     bool m_fresh_timelapse_file_info{ false };
 
-    bool m_is_init_filamentConfig{ false };
+    std::atomic<bool> m_is_init_filamentConfig{ false };   // reset by refreshFilamentConfig() from another thread
 	std::mutex m_config_mtx;
     bool is_net_device{ false };
 
