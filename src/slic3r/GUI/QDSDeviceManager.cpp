@@ -80,6 +80,12 @@ std::vector<std::string> QDSDevice::m_general_colorHexByIndex;
 bool QDSDevice::m_is_init_general = false;
 std::mutex QDSDevice::m_general_mtx;
 
+// Forward declaration (defined below, near initGeneralData)
+static void parseFilamentConfigFromIni(const pt::ptree& pt,
+                                        std::vector<QDSDevice::Filament>& config,
+                                        std::vector<std::string>& vendorNames,
+                                        std::vector<std::string>& colorHexByIndex);
+
 
 template<typename T>
 bool is_json_type(const json& j)
@@ -370,115 +376,57 @@ void QDSDevice::updateBoxDataByJson(const json status)
 
 void QDSDevice::updateFilamentConfig()
 {
-    if (!m_is_init_filamentConfig) {
-       
-        std::lock_guard<std::mutex> lock(m_config_mtx);
-        if (m_is_init_filamentConfig) {
-            return;
-        }
-    }
-    
+    if (m_is_init_filamentConfig) return;
+
     auto future1 = std::async(std::launch::async, [this]() {
         std::lock_guard<std::mutex> lock(m_config_mtx);
-        std::string url = m_frp_url + "/api/qidiclient/config/offical_filament_list";
-        Slic3r::Http httpPost = Slic3r::Http::get(url);
+        if (m_is_init_filamentConfig) return;
+
+        // Extract host from m_frp_url (may be "http://IP" or "http://IP:port")
+        std::string host = m_frp_url;
+        auto pp = host.find("://");
+        if (pp != std::string::npos) host = host.substr(pp + 3);
+        auto cp = host.find(":");
+        if (cp != std::string::npos) host = host.substr(0, cp);
+        auto sp = host.find("/");
+        if (sp != std::string::npos) host = host.substr(0, sp);
+
+        if (host.empty()) {
+            BOOST_LOG_TRIVIAL(warning) << "updateFilamentConfig: empty host, skip";
+            return;
+        }
+
+        std::string url = "http://" + host + ":7125/server/files/config/officiall_filas_list.cfg";
+        BOOST_LOG_TRIVIAL(info) << "updateFilamentConfig: GET " << url;
+
         std::string resultBody;
-        httpPost.timeout_max(5)
-            .header("accept", "application/json")
-            .header("Content-Type", "application/json")
-            .on_complete(
-                [&resultBody](std::string body, unsigned status) {
-                    resultBody = body;
-                }
-            )
-            .on_error(
-                [this](std::string body, std::string error, unsigned status) {
+        bool ok = false;
+        Slic3r::Http::get(url)
+            .timeout_max(5)
+            .on_complete([&resultBody, &ok](std::string body, unsigned status) {
+                if (status == 200) { resultBody = body; ok = true; }
+            })
+            .on_error([](std::string body, std::string error, unsigned status) {
+                BOOST_LOG_TRIVIAL(warning) << "updateFilamentConfig: HTTP error status=" << status << " error=" << error;
+            })
+            .perform_sync();
 
-                }
-                ).perform_sync();
+        if (!ok || resultBody.empty()) {
+            BOOST_LOG_TRIVIAL(warning) << "updateFilamentConfig: failed to download, using local cfg";
+            return;
+        }
+
         try {
-            json bodyJson = json::parse(resultBody);
-            if (!bodyJson.is_object()) {
-                return;
-            }
-            if (!bodyJson.contains("result")) {
-                return;
-            }
-            json resultJson = bodyJson["result"];
-            if (!resultJson.is_object()) {
-                return;
-            }
-            auto parseToString = [&resultJson](std::string name, std::vector<std::string>& data) {
-                if (!resultJson.contains(name) || !resultJson[name].is_object()) {
-                    return;
-                }
-                data.resize(100);
-                for (auto& element : resultJson[name].items()) {
-                    std::string key = element.key();
-                    int index = std::stoi(key);
-                    data[index] = element.value().get<std::string>();
-                }
-            };
-            auto parseToInt = [&resultJson](std::string name, std::vector<int>& data) {
-                if (!resultJson.contains(name) || !resultJson[name].is_object()) {
-                    return;
-                }
-                data.resize(100);
-                for (auto& element : resultJson[name].items()) {
-                    std::string key = element.key();
-                    int index = std::stoi(key);
-                    data[index] = element.value().get<int>();
-                }
-            };
-
-            std::vector<std::string> names;
-			std::vector<std::string> types;
-			std::vector<std::string> colorHexCodes;
-			std::vector<std::string> vendors;
-            parseToString("filament", names);
-			parseToString("type", types);
-			parseToString("colordict", colorHexCodes);
-			parseToString("vendor_list", vendors);
-			std::vector<int> minTemps;
-			std::vector<int> maxTemps;
-			std::vector<int> boxMinTemps;
-			std::vector<int> boxMaxTemps;
-			parseToInt("min_temp", minTemps);
-			parseToInt("max_temp", maxTemps);
-			parseToInt("box_min_temp", boxMinTemps);
-			parseToInt("box_max_temp", boxMaxTemps);
-
-            if(minTemps.size() != m_filamentConfig.size() || maxTemps.size() != m_filamentConfig.size() || boxMinTemps.size() != m_filamentConfig.size() || boxMaxTemps.size() != m_filamentConfig.size())
-                return;
-            for (int i = 1; i < m_filamentConfig.size(); ++i) {
-				m_filamentConfig[i].name = names[i];
-				m_filamentConfig[i].type = types[i];
-				m_filamentConfig[i].minTemp = minTemps[i];
-				m_filamentConfig[i].maxTemp = maxTemps[i];
-				m_filamentConfig[i].boxMinTemp = boxMinTemps[i];
-				m_filamentConfig[i].boxMaxTemp = boxMaxTemps[i];
-				if (i < vendors.size())
-				    m_filamentConfig[i].vendor = vendors[i];
-				if (i < colorHexCodes.size())
-				    m_filamentConfig[i].colorHexCode = colorHexCodes[i];
-            }
-            // Store vendor_list and colordict in dedicated arrays (only if API returned data)
-            if (!vendors.empty())
-                m_vendorNames = vendors;
-            if (!colorHexCodes.empty())
-                m_colorHexByIndex = colorHexCodes;
+            std::istringstream iss(resultBody);
+            pt::ptree pt;
+            pt::ini_parser::read_ini(iss, pt);
+            parseFilamentConfigFromIni(pt, m_filamentConfig, m_vendorNames, m_colorHexByIndex);
             m_is_init_filamentConfig = true;
-
+            BOOST_LOG_TRIVIAL(info) << "updateFilamentConfig: loaded from Moonraker OK";
+        } catch (const std::exception& e) {
+            BOOST_LOG_TRIVIAL(warning) << "updateFilamentConfig: INI parse error: " << e.what();
         }
-        catch (...) {
-
-        }
-
-        
-	});
-
-
-    
+    });
 }
 
 bool QDSDevice::is_online(){
@@ -530,6 +478,48 @@ bool extractNumberWithSscanf(const std::string& str, int& result) {
 	return (sscanf(str.c_str(), "fila%d", &result) == 1);
 }
 
+// Parse INI ptree into filament config arrays (shared by local cfg loading and Moonraker download)
+static void parseFilamentConfigFromIni(const pt::ptree& pt,
+                                        std::vector<QDSDevice::Filament>& config,
+                                        std::vector<std::string>& vendorNames,
+                                        std::vector<std::string>& colorHexByIndex)
+{
+    for (const auto& section : pt) {
+        std::string sectionName = section.first;
+        if (sectionName == "colordict") {
+            for (const auto& item : section.second) {
+                int index = std::stoi(item.first);
+                if (index >= 0 && index < (int)colorHexByIndex.size())
+                    colorHexByIndex[index] = item.second.data();
+                if (index >= 0 && index < (int)config.size())
+                    config[index].colorHexCode = item.second.data();
+            }
+            continue;
+        }
+        if (sectionName == "vendor_list") {
+            for (const auto& item : section.second) {
+                int index = std::stoi(item.first);
+                if (index >= 0 && index < (int)vendorNames.size())
+                    vendorNames[index] = item.second.data();
+                if (index >= 0 && index < (int)config.size())
+                    config[index].vendor = item.second.data();
+            }
+            continue;
+        }
+        int filaIndex = 0;
+        if (!extractNumberWithSscanf(sectionName, filaIndex)) continue;
+        if (filaIndex < 0 || filaIndex >= (int)config.size()) continue;
+        for (const auto& item : section.second) {
+            if (item.first == "filament")      config[filaIndex].name = item.second.data();
+            if (item.first == "type")          config[filaIndex].type = item.second.data();
+            if (item.first == "min_temp")      config[filaIndex].minTemp = item.second.get_value<int>(0);
+            if (item.first == "max_temp")      config[filaIndex].maxTemp = item.second.get_value<int>(0);
+            if (item.first == "box_min_temp")  config[filaIndex].boxMinTemp = item.second.get_value<int>(0);
+            if (item.first == "box_max_temp")  config[filaIndex].boxMaxTemp = item.second.get_value<int>(0);
+        }
+    }
+}
+
 void QDSDevice::initGeneralData()
 {
     if (QDSDevice::m_is_init_general) {
@@ -552,53 +542,10 @@ void QDSDevice::initGeneralData()
 		std::cerr << "Error reading config file: " << e.what() << std::endl;
 		return ;
 	}
-	for (const auto& section : pt) {
-        std::string sectionName = section.first;
-        if (sectionName == "colordict") {
-            for (const auto& item : section.second) {
-                int index = std::stoi(item.first);
-                m_general_colorHexByIndex[index] = item.second.data();
-                m_general_filamentConfig[index].colorHexCode = item.second.data();
-            }
-        }
-		if (sectionName == "vendor_list") {
-			for (const auto& item : section.second) {
-				int index = std::stoi(item.first);
-				m_general_vendorNames[index] = item.second.data();
-				m_general_filamentConfig[index].vendor = item.second.data();
-			}
-		}
-
-        int filaIndex = 0;
-        if (!extractNumberWithSscanf(sectionName,filaIndex)) {
-            continue;
-        }
-		for (const auto& item : section.second) {
-            if (item.first == "filament") {
-                m_general_filamentConfig[filaIndex].name = item.second.data();
-            }
-			if (item.first == "type") {
-				m_general_filamentConfig[filaIndex].type = item.second.data();
-
-			}
-            if (item.first == "min_temp") {
-                m_general_filamentConfig[filaIndex].minTemp = item.second.get_value<int>(0);
-			}
-            if (item.first == "max_temp") {
-				m_general_filamentConfig[filaIndex].maxTemp = item.second.get_value<int>(0);
-
-			}
-			if (item.first == "box_min_temp") {
-				m_general_filamentConfig[filaIndex].boxMinTemp = item.second.get_value<int>(0);
-
-			}
-			if (item.first == "box_max_temp") {
-				m_general_filamentConfig[filaIndex].boxMaxTemp = item.second.get_value<int>(0);
-
-			}
-		}
-	}
-	
+	parseFilamentConfigFromIni(pt,
+	                           QDSDevice::m_general_filamentConfig,
+	                           QDSDevice::m_general_vendorNames,
+	                           QDSDevice::m_general_colorHexByIndex);
 
     QDSDevice::m_is_init_general = true;
 }
