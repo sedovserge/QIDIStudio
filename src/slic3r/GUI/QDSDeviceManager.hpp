@@ -80,6 +80,7 @@ public:
 	void updateByJsonData(json& status);
     bool is_online();
     void updateFilamentConfig();    //When "m_frp_url" is updated, update the config file.
+    void refreshFilamentConfig();   //Force re-download of filament config from printer Moonraker.
 
     void updateBoxDataByJson(const json status);
     std::vector<float> getNozzleDiameter();

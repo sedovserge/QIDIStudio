@@ -374,6 +374,12 @@ void QDSDevice::updateBoxDataByJson(const json status)
     box_is_update = true;
 }
 
+void QDSDevice::refreshFilamentConfig()
+{
+    m_is_init_filamentConfig = false;
+    updateFilamentConfig();
+}
+
 void QDSDevice::updateFilamentConfig()
 {
     if (m_is_init_filamentConfig) return;
@@ -842,10 +848,6 @@ std::string QDSDeviceManager::addDevice(const std::string& dev_name, const std::
 
         devices_[device_id] = device;
         BOOST_LOG_TRIVIAL(trace) << __FUNCTION__ << "[Manager] Device added: " << device_id << std::endl;
-
-        // Download officiall_filas_list.cfg from printer Moonraker to keep
-        // filament/vendor/color tables in sync with the actual firmware
-        device->updateFilamentConfig();
     }
 
     std::thread([this, device_id]() {
@@ -1012,7 +1014,12 @@ bool QDSDeviceManager::disconnectDevice(const std::string& device_id) {
 void QDSDeviceManager::onOpen(const std::string& device_id, websocketpp::connection_hdl hdl) {
     BOOST_LOG_TRIVIAL(trace) << __FUNCTION__ << "[WS] Device " << device_id << " connected." << std::endl;
     processConnectionStatus(device_id, "connected");
-    
+
+    // Refresh filament config from printer Moonraker on every connect
+    if (auto dev = getDevice(device_id)) {
+        dev->refreshFilamentConfig();
+    }
+
     std::thread([this, device_id]() {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         sendSubscribeMessage(device_id);
