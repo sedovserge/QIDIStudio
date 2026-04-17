@@ -1012,20 +1012,28 @@ void QDSDevice::updateFilamentConfig()
                 parseToInt("box_min_temp", boxMinTemps);
                 parseToInt("box_max_temp", boxMaxTemps);
 
+                // Empty response must not wipe the config: resize(0) would make
+                // flushPendingBoxUpdate() re-enter updateBoxDataByJson() and deadlock on m_config_mtx.
+                if (names.empty())
+                    return false;
+
                 m_filamentConfig.resize(names.size());
                 for (int i = 1; i < (int)m_filamentConfig.size(); ++i) {
-                    m_filamentConfig[i].name        = names[i];
-                    m_filamentConfig[i].type        = types[i];
-                    m_filamentConfig[i].minTemp     = minTemps[i];
-                    m_filamentConfig[i].maxTemp     = maxTemps[i];
-                    m_filamentConfig[i].boxMinTemp  = boxMinTemps[i];
-                    m_filamentConfig[i].boxMaxTemp  = boxMaxTemps[i];
-                    m_filamentConfig[i].vendor      = vendors[i];
-                    m_filamentConfig[i].colorHexCode= colorHexCodes[i];
+                    m_filamentConfig[i].name = names[i];
+                    if (i < (int)types.size())       m_filamentConfig[i].type       = types[i];
+                    if (i < (int)minTemps.size())    m_filamentConfig[i].minTemp    = minTemps[i];
+                    if (i < (int)maxTemps.size())    m_filamentConfig[i].maxTemp    = maxTemps[i];
+                    if (i < (int)boxMinTemps.size()) m_filamentConfig[i].boxMinTemp = boxMinTemps[i];
+                    if (i < (int)boxMaxTemps.size()) m_filamentConfig[i].boxMaxTemp = boxMaxTemps[i];
+                    // Index-aligned copies are still read by QDSPrinterWebView (SET_COLOR/SET_FILAMENT_VENDOR)
+                    if (i < (int)vendors.size())       m_filamentConfig[i].vendor       = vendors[i];
+                    if (i < (int)colorHexCodes.size()) m_filamentConfig[i].colorHexCode = colorHexCodes[i];
                 }
-                // Store vendor_list and colordict in dedicated arrays
-                m_vendorNames = vendors;
-                m_colorHexByIndex = colorHexCodes;
+                // Store vendor_list and colordict in dedicated arrays (only if the source returned them)
+                if (!vendors.empty())
+                    m_vendorNames = vendors;
+                if (!colorHexCodes.empty())
+                    m_colorHexByIndex = colorHexCodes;
                 m_is_init_filamentConfig = true;
 
                 // Flush any save_variables that were queued while config was loading.
