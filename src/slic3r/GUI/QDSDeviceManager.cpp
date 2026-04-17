@@ -86,6 +86,12 @@ std::string format_timelapse_file_size_b_kb_mb(std::uint64_t bytes)
 
 namespace pt = boost::property_tree;
 
+// Forward declaration (defined below, after extractNumberWithSscanf)
+static int parseFilamentConfigFromIni(const pt::ptree& pt,
+                                      std::vector<QDSDevice::Filament>& config,
+                                      std::vector<std::string>& vendorNames,
+                                      std::vector<std::string>& colorHexByIndex);
+
 //cj_5
 LocalDeviceDiscovery::Snapshot LocalDeviceDiscovery::snapshot() const
 {
@@ -978,6 +984,67 @@ void QDSDevice::updateFilamentConfig()
 
     auto future1 = std::async(std::launch::async, [this, flushPendingBoxUpdate]() {
         std::string resultBody;
+
+        // Q2 firmware 1.1.1: the local /api/qidiclient endpoint returns 404 and the
+        // bundled cfg was removed upstream (f62d6a62). Read the printer's own
+        // officiall_filas_list.cfg via Moonraker instead: it carries the user's
+        // vendor_list/colordict/filaN entries that RFID tags reference by index.
+        // HTTP runs without m_config_mtx; the result is swapped in under the lock.
+        if (!active_p2p && !is_net_device) {
+            std::string host = m_frp_url;
+            auto pp = host.find("://");
+            if (pp != std::string::npos) host = host.substr(pp + 3);
+            auto sp = host.find('/');
+            if (sp != std::string::npos) host = host.substr(0, sp);
+            auto cp = host.find(':');
+            if (cp != std::string::npos) host = host.substr(0, cp);
+
+            if (host.empty()) {
+                BOOST_LOG_TRIVIAL(warning) << "updateFilamentConfig: empty host, skip Moonraker";
+            } else {
+                const std::string url = "http://" + host + ":7125/server/files/config/officiall_filas_list.cfg";
+                BOOST_LOG_TRIVIAL(info) << "updateFilamentConfig: GET " << url;
+
+                std::string iniBody;
+                bool ok = false;
+                Slic3r::Http::get(url)
+                    .timeout_max(5)
+                    .on_complete([&iniBody, &ok](std::string body, unsigned status) {
+                        if (status == 200) { iniBody = std::move(body); ok = true; }
+                    })
+                    .on_error([](std::string body, std::string error, unsigned status) {
+                        BOOST_LOG_TRIVIAL(warning) << "updateFilamentConfig: HTTP error status=" << status << " error=" << error;
+                    })
+                    .perform_sync();
+
+                if (ok && !iniBody.empty()) {
+                    std::vector<Filament>    cfg(100);
+                    std::vector<std::string> vendors(100);
+                    std::vector<std::string> colors(100);
+                    int filaCount = 0;
+                    try {
+                        std::istringstream iss(iniBody);
+                        pt::ptree tree;
+                        pt::ini_parser::read_ini(iss, tree);
+                        filaCount = parseFilamentConfigFromIni(tree, cfg, vendors, colors);
+                    } catch (const std::exception& e) {
+                        BOOST_LOG_TRIVIAL(warning) << "updateFilamentConfig: INI parse error: " << e.what();
+                    }
+                    if (filaCount > 0) {
+                        std::lock_guard<std::mutex> lock(m_config_mtx);
+                        m_filamentConfig.swap(cfg);
+                        m_vendorNames.swap(vendors);
+                        m_colorHexByIndex.swap(colors);
+                        m_is_init_filamentConfig = true;
+                        BOOST_LOG_TRIVIAL(info) << "updateFilamentConfig: loaded from Moonraker OK, fila=" << filaCount;
+                        // Safe: m_filamentConfig is non-empty, so updateBoxDataByJson() won't re-lock.
+                        flushPendingBoxUpdate();
+                        return;
+                    }
+                }
+                BOOST_LOG_TRIVIAL(warning) << "updateFilamentConfig: Moonraker cfg unavailable, falling back";
+            }
+        }
         //y83
         std::lock_guard<std::mutex> lock(m_config_mtx);
 
@@ -1149,12 +1216,17 @@ void QDSDevice::updateFilamentConfig()
                         }
                     ).perform_sync();
 
-                json bodyJson_ = json::parse(resultBody);
-                if (!bodyJson_.contains("result")) return;
-                json resultJson_ = bodyJson_["result"];
-                if (!resultJson_.is_object()) return;
-                if (!resultJson_.empty())
-                    parseFilamentJson(resultJson_);
+                // Body may be an HTML 404 page (Q2 1.1.1): don't let json::parse throw out of the task.
+                try {
+                    json bodyJson_ = json::parse(resultBody);
+                    if (!bodyJson_.contains("result")) return;
+                    json resultJson_ = bodyJson_["result"];
+                    if (!resultJson_.is_object()) return;
+                    if (!resultJson_.empty())
+                        parseFilamentJson(resultJson_);
+                } catch (const std::exception& e) {
+                    BOOST_LOG_TRIVIAL(warning) << "updateFilamentConfig: local endpoint parse error: " << e.what();
+                }
             }
         }
 	});
@@ -1237,6 +1309,51 @@ int QDSDevice::getJsonCurStageToInt(const json& jsonData, std::string jsonName)
 bool extractNumberWithSscanf(const std::string& str, int& result) {
 	// 使用 sscanf 直接匹配格式并提取数字
 	return (sscanf(str.c_str(), "fila%d", &result) == 1);
+}
+
+// Parse officiall_filas_list.cfg (INI) into index-aligned arrays.
+// Callers pre-size the vectors; indices outside them are ignored.
+// Returns the number of [filaN] sections applied (0 means the file is unusable).
+static int parseFilamentConfigFromIni(const pt::ptree& pt,
+                                      std::vector<QDSDevice::Filament>& config,
+                                      std::vector<std::string>& vendorNames,
+                                      std::vector<std::string>& colorHexByIndex)
+{
+    int filaCount = 0;
+    for (const auto& section : pt) {
+        const std::string& sectionName = section.first;
+        if (sectionName == "colordict" || sectionName == "vendor_list") {
+            const bool isColor = sectionName == "colordict";
+            for (const auto& item : section.second) {
+                int index = -1;
+                try { index = std::stoi(item.first); } catch (...) { continue; }
+                auto& dst = isColor ? colorHexByIndex : vendorNames;
+                if (index >= 0 && index < (int)dst.size())
+                    dst[index] = item.second.data();
+                // Index-aligned copies are still read by QDSPrinterWebView (SET_COLOR/SET_FILAMENT_VENDOR)
+                if (index >= 0 && index < (int)config.size()) {
+                    if (isColor)
+                        config[index].colorHexCode = item.second.data();
+                    else
+                        config[index].vendor = item.second.data();
+                }
+            }
+            continue;
+        }
+        int filaIndex = 0;
+        if (!extractNumberWithSscanf(sectionName, filaIndex)) continue;
+        if (filaIndex < 0 || filaIndex >= (int)config.size()) continue;
+        for (const auto& item : section.second) {
+            if (item.first == "filament")      config[filaIndex].name       = item.second.data();
+            if (item.first == "type")          config[filaIndex].type       = item.second.data();
+            if (item.first == "min_temp")      config[filaIndex].minTemp    = item.second.get_value<int>(0);
+            if (item.first == "max_temp")      config[filaIndex].maxTemp    = item.second.get_value<int>(0);
+            if (item.first == "box_min_temp")  config[filaIndex].boxMinTemp = item.second.get_value<int>(0);
+            if (item.first == "box_max_temp")  config[filaIndex].boxMaxTemp = item.second.get_value<int>(0);
+        }
+        ++filaCount;
+    }
+    return filaCount;
 }
 
 std::vector<float> QDSDevice::getNozzleDiameter(){
