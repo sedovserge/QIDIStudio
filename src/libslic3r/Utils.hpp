@@ -371,7 +371,7 @@ struct LogEncOptions
         //ENC_RSA_2048 = 2, maybe supported in future
     };
 
-    LogEncType enc_type = LOG_ENC_AES_256_CBC;
+    LogEncType enc_type = LOG_ENC_NONE;
     std::string enc_key_url;
     std::string enc_key_host_env;
 };
