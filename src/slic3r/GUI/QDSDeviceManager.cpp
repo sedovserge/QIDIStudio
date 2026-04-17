@@ -842,6 +842,10 @@ std::string QDSDeviceManager::addDevice(const std::string& dev_name, const std::
 
         devices_[device_id] = device;
         BOOST_LOG_TRIVIAL(trace) << __FUNCTION__ << "[Manager] Device added: " << device_id << std::endl;
+
+        // Download officiall_filas_list.cfg from printer Moonraker to keep
+        // filament/vendor/color tables in sync with the actual firmware
+        device->updateFilamentConfig();
     }
 
     std::thread([this, device_id]() {
