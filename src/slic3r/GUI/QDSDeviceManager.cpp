@@ -457,10 +457,16 @@ void QDSDevice::updateFilamentConfig()
 				m_filamentConfig[i].maxTemp = maxTemps[i];
 				m_filamentConfig[i].boxMinTemp = boxMinTemps[i];
 				m_filamentConfig[i].boxMaxTemp = boxMaxTemps[i];
+				if (i < vendors.size())
+				    m_filamentConfig[i].vendor = vendors[i];
+				if (i < colorHexCodes.size())
+				    m_filamentConfig[i].colorHexCode = colorHexCodes[i];
             }
-            // Store vendor_list and colordict in dedicated arrays
-            m_vendorNames = vendors;
-            m_colorHexByIndex = colorHexCodes;
+            // Store vendor_list and colordict in dedicated arrays (only if API returned data)
+            if (!vendors.empty())
+                m_vendorNames = vendors;
+            if (!colorHexCodes.empty())
+                m_colorHexByIndex = colorHexCodes;
             m_is_init_filamentConfig = true;
 
         }
@@ -552,12 +558,14 @@ void QDSDevice::initGeneralData()
             for (const auto& item : section.second) {
                 int index = std::stoi(item.first);
                 m_general_colorHexByIndex[index] = item.second.data();
+                m_general_filamentConfig[index].colorHexCode = item.second.data();
             }
         }
 		if (sectionName == "vendor_list") {
 			for (const auto& item : section.second) {
 				int index = std::stoi(item.first);
 				m_general_vendorNames[index] = item.second.data();
+				m_general_filamentConfig[index].vendor = item.second.data();
 			}
 		}
 
