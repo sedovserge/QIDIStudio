@@ -6,7 +6,7 @@ jobs:
   main:    
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-2022, macos-15]
+        os: [ubuntu-latest, windows-2022]   # macos-15 removed: upstream deps (Assimp zlib) fail on macOS SDK 15.5
     runs-on: ${{ matrix.os }}
 
     steps:
