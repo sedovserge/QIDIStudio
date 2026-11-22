@@ -241,8 +241,6 @@ set(SLIC3R_GUI_SOURCES
     GUI/DownloadManager.hpp
     GUI/QDSDeviceManager.cpp
     GUI/QDSDeviceManager.hpp
-    QIDI/UserPresetSyncManager.cpp
-    QIDI/UserPresetSyncManager.hpp
     GUI/BedShapeDialog.cpp
     GUI/BedShapeDialog.hpp
     GUI/Plater.cpp
@@ -683,6 +681,10 @@ if(QDT_RELEASE_TO_PUBLIC)
 			QIDI/QIDISSEClientV2.hpp
             QIDI/P2PManager.cpp
 		    QIDI/P2PManager.hpp
+			# Moved here: upstream does not publish this source (ignored by its .gitignore),
+			# and all uses are already behind #if QDT_RELEASE_TO_PUBLIC.
+			QIDI/UserPresetSyncManager.cpp
+			QIDI/UserPresetSyncManager.hpp
 		)
 endif ()
 
