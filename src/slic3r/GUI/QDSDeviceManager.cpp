@@ -805,19 +805,19 @@ void QDSDevice::updateBoxDataByJson(const json status)
 	for (int i = 0; i < 17; ++i) {
 		std::string serial = "slot" + std::to_string(i);
 		int filamentIndex = getJsonCurStageToInt(saveVariables, "filament_" + serial);
-		if (filamentIndex != -1 && filamentIndex < (int)m_filamentConfig.size()) {
+		if (filamentIndex >= 0 && filamentIndex < (int)m_filamentConfig.size()) {
             m_boxData[i].filament_idex = filamentIndex;
 			m_boxData[i].name = m_filamentConfig[filamentIndex].name;
 			m_boxData[i].type = m_filamentConfig[filamentIndex].type;
 		}
 		int vendorIndx = getJsonCurStageToInt(saveVariables, "vendor_" + serial);
-		if (vendorIndx != -1 && vendorIndx < (int)m_vendorNames.size()) {
+		if (vendorIndx >= 0 && vendorIndx < (int)m_vendorNames.size()) {
 			m_boxData[i].vendor = m_vendorNames[vendorIndx];
 			m_boxData[i].vendor_index = vendorIndx;
 		}
 
 		int colorIndex = getJsonCurStageToInt(saveVariables, "color_" + serial);
-		if (colorIndex != -1 && colorIndex < (int)m_colorHexByIndex.size()) {
+		if (colorIndex >= 0 && colorIndex < (int)m_colorHexByIndex.size()) {
 			m_boxData[i].colorHexCode = m_colorHexByIndex[colorIndex];
 		}
 		if (i < 16) {
@@ -1024,6 +1024,18 @@ void QDSDevice::updateFilamentConfig()
                     .perform_sync();
 
                 if (ok && !iniBody.empty()) {
+                    // Reconnects normally return the same file: keep the tables untouched so
+                    // lock-free readers (QDSPrinterWebView) never see them change underneath.
+                    {
+                        std::lock_guard<std::mutex> lock(m_config_mtx);
+                        if (!m_filamentConfig.empty() && iniBody == m_lastFilamentCfgBody) {
+                            m_is_init_filamentConfig = true;
+                            BOOST_LOG_TRIVIAL(info) << "updateFilamentConfig: Moonraker cfg unchanged";
+                            flushPendingBoxUpdate();
+                            return;
+                        }
+                    }
+
                     std::vector<Filament>    cfg(100);
                     std::vector<std::string> vendors(100);
                     std::vector<std::string> colors(100);
@@ -1038,9 +1050,12 @@ void QDSDevice::updateFilamentConfig()
                     }
                     if (filaCount > 0) {
                         std::lock_guard<std::mutex> lock(m_config_mtx);
-                        m_filamentConfig.swap(cfg);
-                        m_vendorNames.swap(vendors);
-                        m_colorHexByIndex.swap(colors);
+                        // Copy-assign instead of swap: with equal sizes the vectors keep their
+                        // buffers, so a lock-free reader is never left pointing at freed memory.
+                        m_filamentConfig  = cfg;
+                        m_vendorNames     = vendors;
+                        m_colorHexByIndex = colors;
+                        m_lastFilamentCfgBody = std::move(iniBody);
                         m_is_init_filamentConfig = true;
                         BOOST_LOG_TRIVIAL(info) << "updateFilamentConfig: loaded from Moonraker OK, fila=" << filaCount;
                         // Safe: m_filamentConfig is non-empty, so updateBoxDataByJson() won't re-lock.

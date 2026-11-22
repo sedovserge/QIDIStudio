@@ -1,10 +1,26 @@
 # QIDIStudio Fork — Box Sync Fix
 
-Форк [bambulab/QIDIStudio](https://github.com/QIDITECH/QIDIStudio) с фиксами для корректной работы QIDI Box (АСПП) с принтером Q2 и актуальной прошивкой.
+Форк [QIDITECH/QIDIStudio](https://github.com/QIDITECH/QIDIStudio) с фиксами для корректной работы QIDI Box с принтером Q2 на прошивке **1.1.1** и пользовательскими (не-QIDI) RFID-метками.
 
-**Ветка**: `fix/box-vendor-mapping`
+**Ветка**: `fix/box-02.07.02.60` (предыдущая база: `fix/box-vendor-mapping`, тег `checkpoint/pre-rebase-02.07.02.60`)
+**База upstream**: `8e28fc30` = `c58fdc56` (02.07.02.60, 2026-08-06) + PA-фикс `8e28fc30`
 **Автор проблемы**: баги в оригинальной студии при работе с не-QIDI филаментами.
-**Статус**: работает, подтверждено на реальном принтере Q2 + QIDI Box со слотами NIT PETG, Filamentarno, KREMEN.
+**Статус**: на 02.05.01.53 подтверждено на реальном принтере Q2 + QIDI Box со слотами NIT PETG, Filamentarno, KREMEN. Перенос на 02.07.02.60 — ждёт проверки на принтере.
+
+---
+
+## ⚠️ Не обновлять базу дальше `c58fdc56` (02.07.02.60)
+
+Начиная с `c07a89e2` (2026-10-07) upstream читает Box **только** из Klipper-объекта `multi_color_controller` (строки `vendor_str`, `color_rgb_str`, `filament_id` вида `QF…`). Его отдаёт прошивка Q2 **01.01.03.x**. На **1.1.1** этого объекта нет (Moonraker возвращает `{}`), Box отдаётся индексами в `save_variables` — со свежим upstream Box не синхронизируется вообще.
+
+Прошивку не обновляем:
+- даунгрейда нет (официально запрещён);
+- в 01.01.03.x сопоставление меток зашито в прошивку: `QIDI_Client/resource/filament_config/filament-0.4.json` (56 записей: QIDI, Generic, Bambu, HATCHBOX, Overture, Polymaker) + `LEGACY_RFID_*_MAP` в `box_rfid`; обновление удаляет `box_rfid.*` и перезаписывает `printer_data/config` стоковыми файлами;
+- полезных для нас фиксов в 01.01.02.x–01.01.03.x нет.
+
+Пакеты прошивок (для анализа): https://www.qidimaker.com/en/downloads/firmware/Q2
+
+Из upstream после `c58fdc56` переносить только точечные фиксы (`cherry-pick`), не трогающие `QDSDeviceManager`.
 
 ---
 
@@ -12,14 +28,16 @@
 
 Оригинальная студия не могла отправить задание на печать, если в Box стояли филаменты не-QIDI брендов (NIT, Filamentarno, Polymaker и т.д.). Ошибка: **"Not all filaments used in slicing are mapped to the printer"**.
 
-Причины и фиксы в трёх независимых коммитах:
+Принтерная часть: на принтере стоковый `klippy/extras/box_rfid.so` заменён на `box_rfid.py`. Стоковый модуль принимает метки только с вендором QIDI (1) / Generic (0), а заменённый пропускает любые вендоры из `[vendor_list]` пользовательского `officiall_filas_list.cfg` (NIT=2 … KREMEN=8). Студийная часть — коммиты ниже.
 
-| # | Коммит | Проблема | Файл |
+Причины и фиксы (SHA: старая база 02.05.01.53 → новая 02.07.02.60):
+
+| # | Коммит (старый → новый) | Проблема | Файл |
 |---|--------|----------|------|
-| 1 | `89d5d93` | vendor/color индексы перекрывались с fila-индексами в `m_filamentConfig` | `QDSDeviceManager.cpp` + `.hpp` |
-| 2 | `17504bd` | Guard от затирания локального cfg пустыми данными из API + возврат записи в `m_filamentConfig` | `QDSDeviceManager.cpp` |
-| 3 | `ee7c83d` + `2d03867` | Устаревший bundled cfg → скачиваем актуальный с принтера через Moonraker | `QDSDeviceManager.cpp` |
-| 4 | `a162f8c` | Шифрование логов мешало диагностике | `Utils.hpp` |
+| 1 | `89d5d93` → `ae5ab63` | vendor/color индексы перекрывались с fila-индексами в `m_filamentConfig` | `QDSDeviceManager.cpp` + `.hpp` |
+| 2 | `17504bd` → `4f4bad2` | Guard от затирания пустыми данными + проверки границ + возврат записи в `m_filamentConfig` | `QDSDeviceManager.cpp` |
+| 3 | `ee7c83d` + `2d03867` → `970a1d8` + `68d7791` | cfg с принтера через Moonraker (в 02.07 без этого Box вообще не заполняется) | `QDSDeviceManager.cpp` + `.hpp` |
+| 4 | `a162f8c` → `6995187` | Шифрование логов мешало диагностике | `Utils.hpp` |
 
 ---
 
@@ -50,7 +68,7 @@ std::string test_vendor = slot_vendor == "QIDI" ? "1" : "0";  // упрощен�
 ### Фикс
 
 **`QDSDeviceManager.hpp`**:
-- Добавлены **отдельные** массивы `m_vendorNames` и `m_colorHexByIndex` (+ static-версии `m_general_vendorNames`, `m_general_colorHexByIndex`)
+- Добавлены **отдельные** массивы `m_vendorNames` и `m_colorHexByIndex` (static-версии `m_general_*` были на базе 02.05; в 02.07 upstream их удалил вместе с `initGeneralData()`)
 - В struct `Filament` добавлено поле `vendor_index` (числовой ID vendor из RFID)
 
 **`QDSDeviceManager.cpp`**:
@@ -134,11 +152,13 @@ distance для всех Box-слотов = 999999 → маппинг пусто
 - Логика парсинга вынесена в shared helper `parseFilamentConfigFromIni()`, используется также в `initGeneralData()` (DRY)
 - `BOOST_LOG_TRIVIAL` логирование (было silent catch)
 - Extract host из `m_frp_url` (отрезает `http://` и существующий порт)
-- Graceful fallback: если download упал — используем bundled cfg
+- Graceful fallback: если download упал — используем bundled cfg (на базе 02.05; в 02.07 bundled cfg нет — fallback на пути upstream)
+
+**На базе 02.07.02.60** (`970a1d8`): upstream-код `updateFilamentConfig()` сохранён, Moonraker-ветка вставлена в начало async-лямбды до захвата `m_config_mtx`. HTTP и разбор INI — в локальные векторы, затем под мьютексом копирование на место + `flushPendingBoxUpdate()`. Если текст cfg не изменился с прошлой загрузки (`m_lastFilamentCfgBody`), таблицы не трогаются. `parseFilamentConfigFromIni()` возвращает число `[filaN]`; при 0 — fallback.
 
 **Вызов метода** (`2d03867`):
 - Раньше вызывался только из `PrinterWebView.cpp:1583` (cloud/network-device path)
-- Перенесён в `QDSDeviceManager::onOpen()` (WebSocket connect) — срабатывает **каждый раз** при подключении (старт студии, реконнект)
+- Перенесён в `QDSDeviceManager::onOpen()` (WebSocket connect) — срабатывает **каждый раз** при подключении (старт студии, реконнект). На 02.07 — внутри detached-потока `onOpen` перед `sendSubscribeMessage`, только для локальных устройств (`!is_net_device && !active_p2p`)
 - Добавлен public `refreshFilamentConfig()` (сбрасывает `m_is_init_filamentConfig` + вызывает update) — нужен чтобы `QDSDeviceManager` мог форсировать обновление без доступа к приватному полю
 
 ### Результат
@@ -185,7 +205,7 @@ box_rfid.py (Klipper) читает байты:
   color    = data[1]  →  save_variable("color_slot0", 2)
   vendor   = data[2]  →  save_variable("vendor_slot0", 2)
        ↓
-QDSDevice::onOpen() вызывает refreshFilamentConfig():
+QDSDeviceManager::onOpen() → фоновый поток → refreshFilamentConfig():
   HTTP GET http://<printer>:7125/server/files/config/officiall_filas_list.cfg
   parse INI → m_filamentConfig[51].type = "PETG"
               m_vendorNames[2] = "NIT"
@@ -246,33 +266,51 @@ filament_id = "P" + MD5("<vendor> <type> <serial>")[:7]
 | 5 | PIC |
 | 6 | Fiberon |
 | 7 | FDPlast |
+| 8 | KREMEN |
 
-Расширяется прошивкой — через Moonraker студия подхватывает автоматически.
+ID 2–8 добавлены пользователем вручную в cfg на принтере (вместе с `[fila51]`…`[fila57]`). Через Moonraker студия подхватывает их автоматически.
 
 ---
 
 ## Как мерджить новую версию upstream
 
-1. Добавь upstream remote и подтяни: `git remote add upstream https://github.com/QIDITECH/QIDIStudio && git fetch upstream`
-2. `git checkout fix/box-vendor-mapping && git rebase upstream/main`
-3. Конфликты будут в этих файлах (в порядке важности):
-   - `src/slic3r/GUI/QDSDeviceManager.cpp` — основные правки в `updateBoxDataByJson()`, `updateFilamentConfig()`, `initGeneralData()`, `onOpen()`, `addDevice()`
-   - `src/slic3r/GUI/QDSDeviceManager.hpp` — новые поля `m_vendorNames`, `m_colorHexByIndex`, `vendor_index`, метод `refreshFilamentConfig()`
+> Сначала прочитай раздел «⚠️ Не обновлять базу дальше `c58fdc56`». Новая база имеет смысл только если она ещё содержит разбор `save_variables` (проверка: `git show <sha>:src/slic3r/GUI/QDSDeviceManager.cpp | grep -c multi_color_controller` должно быть 0).
+
+1. `git remote add upstream https://github.com/QIDITECH/QIDIStudio && git fetch upstream`
+2. Checkpoint: `git tag -a checkpoint/pre-rebase-<ver> <текущая ветка> -m "..."`
+3. `git switch -c fix/box-<ver> <текущая ветка>`
+4. `git -c merge.conflictStyle=zdiff3 rebase --no-keep-empty --onto <новая_база> <старая_база>` (старая база сейчас `8e28fc30`)
+5. Конфликты будут в:
+   - `src/slic3r/GUI/QDSDeviceManager.cpp` — `updateBoxDataByJson()`, `updateFilamentConfig()` (`parseFilamentJson`, Moonraker-ветка), `parseFilamentConfigFromIni()`, `onOpen()`, `upBoxInfoToBoxMsg()`
+   - `src/slic3r/GUI/QDSDeviceManager.hpp` — `vendor_index`, `m_vendorNames`, `m_colorHexByIndex`, `refreshFilamentConfig()`, `std::atomic<bool> m_is_init_filamentConfig`
    - `src/libslic3r/Utils.hpp` — одна строка про log encryption
-4. Проверь что все 4 коммита применены (см. таблицу TL;DR)
-5. Запусти CI — должен пройти зелёным на Windows/Linux/macOS
+6. **Кодировка**: `.cpp/.hpp` в GBK, переводы строк LF. Не открывать и не сохранять их редактором, который перекодирует в UTF-8. После резолва `git diff --stat` не должен показывать тысячи строк.
+7. Проверки: `git range-diff <старая_база>..<старая ветка> <новая_база>..HEAD`; `git grep -n 'm_filamentConfig\[vendorIndx\]\|m_filamentConfig\[colorIndex\]\|== "QIDI" ? "1"' -- src` — пусто.
+8. CI (Windows-джоба зелёная), затем проверка на принтере (см. «Как проверить»).
+9. В `main` — без force push: `git merge -s ours --no-ff <старый main>` на новой ветке, затем `main` fast-forward.
 
 ### Точки резолва конфликтов
 
-Если upstream изменил `updateFilamentConfig()` — **сохрани нашу версию** (Moonraker INI), upstream JSON API не работает на Q2.
+**Изменения upstream 02.05 → 02.07, влияющие на фикс:**
+- `f62d6a62` удалил bundled `resources/profiles/officiall_filas_list.cfg`, `initGeneralData()` и static `m_general_*`. Не возвращать.
+- Отложенная обработка Box: если `m_filamentConfig` пуст, `updateBoxDataByJson()` кладёт status в `m_pending_save_variables`; `flushPendingBoxUpdate()` обрабатывает его после загрузки cfg.
+- `updateFilamentConfig()`: `std::async` (деструктор future блокирует вызывающего), общая лямбда `parseFilamentJson`, пути p2p / облако (`#if QDT_RELEASE_TO_PUBLIC`, в CI вырезаны) / локальный `/api/qidiclient/...` (на Q2 — 404).
+- `QDSPrinterWebView.cpp` сам вызывает `updateFilamentConfig()` после `addDevice`; там же по индексам читаются `m_filamentConfig[i].vendor/colorHexCode` для SET_COLOR / SET_FILAMENT_VENDOR — dual-write нужен.
 
-Если upstream изменил парсинг RFID в `updateBoxDataByJson()` — **обязательно** сохрани:
-- Чтение vendor из `m_vendorNames[vendorIndx]` (не `m_filamentConfig`)
-- Чтение color из `m_colorHexByIndex[colorIndex]` (не `m_filamentConfig`)
-- Запись `vendor_index = vendorIndx`
-- Формирование `test_vendor` через `std::to_string(m_boxData[i].vendor_index)`
+**Что обязательно сохранить:**
+- `updateBoxDataByJson()`: vendor из `m_vendorNames[vendorIndx]`, color из `m_colorHexByIndex[colorIndex]`, `vendor_index = vendorIndx`, проверки границ всех трёх индексов.
+- `test_vendor = std::to_string(...vendor_index)` в `updateBoxDataByJson()` и `upBoxInfoToBoxMsg()`.
+- Moonraker-ветка в начале async-лямбды `updateFilamentConfig()`, **до** `lock_guard(m_config_mtx)`; upstream-пути остаются fallback'ом.
+- `parseFilamentJson`: `if (names.empty()) return false;` и проверки границ.
 
-Если upstream добавил свою схему ID (не QD_) — нужно ре-исследовать. Прошивка Q2 шлёт `tray_info_idx` в формате `QD_*`, см. `QDSDeviceManager.cpp` (строки ~338-343 mapping и ~356 формирование).
+**Правила потокобезопасности:**
+- HTTP — вне `m_config_mtx`; результат применять под мьютексом **копированием на место** (`m_filamentConfig = cfg`, размеры равны → буфер не перевыделяется), **не `swap`**: `swap` освобождает старый буфер, который может читать UI-поток без мьютекса (use-after-free при reconnect).
+- Неизменившийся cfg (`m_lastFilamentCfgBody`) не применять повторно.
+- Индексы из `save_variables` проверять как `>= 0 && < size()` (`getJsonCurStageToInt` возвращает любое целое, `-1` — только «нет ключа»).
+- Не допускать `m_filamentConfig.size() == 0` перед `flushPendingBoxUpdate()` — иначе `updateBoxDataByJson()` повторно возьмёт `m_config_mtx` → deadlock.
+- `refreshFilamentConfig()` вызывать только из фонового потока (в `onOpen` — внутри detached-потока до `sendSubscribeMessage`), не из потока websocketpp.
+
+Если upstream добавил свою схему ID (не QD_) — нужно ре-исследовать, см. раздел ⚠️ выше.
 
 ---
 
@@ -299,15 +337,25 @@ build_win.bat -s all -d "deps\build\QIDIStudio_dep"
 2. В логе `%APPDATA%\QIDIStudio\log\studio_*.log.0` (plaintext после коммита 4) должно появиться:
    ```
    updateFilamentConfig: GET http://<ip>:7125/server/files/config/officiall_filas_list.cfg
-   updateFilamentConfig: loaded from Moonraker OK
+   updateFilamentConfig: loaded from Moonraker OK, fila=57
    ```
-3. Загрузить модель, в Prepare выбрать профиль филамента того же типа что стоит в Box (напр. PETG)
-4. Prepare → Send print — должно сработать без ошибки "Not all filaments..."
+3. Для **каждого** занятого слота тип, вендор и цвет совпадают с `save_variables` принтера и его cfg. Например, `filament_slot0=51, vendor_slot0=8` → PETG / KREMEN / `QD_1_8_51`.
+4. Переподключение (перезагрузка принтера) — в логе снова загрузка cfg, интерфейс не подвисает.
+5. Загрузить модель, в Prepare выбрать профиль филамента того же типа что стоит в Box (напр. PETG)
+6. Prepare → Send print — должно сработать без ошибки "Not all filaments..."
+
+Ручная проверка эндпоинтов:
+```
+curl -i http://<ip>/api/qidiclient/config/offical_filament_list          # на Q2 1.1.1: 404
+curl http://<ip>:7125/server/files/config/officiall_filas_list.cfg      # cfg принтера
+curl "http://<ip>:7125/printer/objects/query?save_variables"           # индексы слотов
+curl "http://<ip>:7125/printer/objects/query?multi_color_controller"    # на 1.1.1: {}
+```
 
 ---
 
 ## Известные ограничения
 
-- **Cloud/FRP сценарий**: если принтер доступен только через QIDI cloud (не локально) — Moonraker на порту 7125 недоступен. Студия упадёт на timeout → fallback на bundled cfg. Box sync в таком сценарии всё равно работать не будет (это ограничение прошивки/cloud, не нашего фикса).
-- **Прошивки без fila 51+**: если прошивка старая и в cfg действительно только 50 fila — Box не сможет прислать индекс > 50 в принципе, так что проблема неактуальна.
-- **Bundled cfg не обновляется**: `resources/profiles/officiall_filas_list.cfg` в форке остался исходный (50 fila). Его нет смысла обновлять — при коннекте к принтеру подтягиваем актуальный.
+- **Cloud/FRP сценарий**: если принтер доступен только через QIDI cloud (не локально) — Moonraker на порту 7125 недоступен. Moonraker-ветка не сработает, остаются пути upstream. Box sync в таком сценарии всё равно работать не будет (это ограничение прошивки/cloud, не нашего фикса).
+- **Нет bundled cfg** (удалён upstream в 02.07): если Moonraker недоступен при подключении, Box остаётся пустым до следующего подключения. Для локального принтера Moonraker — тот же хост, что и WebSocket, так что риск низкий.
+- **Гонка читателей**: `QDSPrinterWebView` читает `m_filamentConfig` без мьютекса. Повторная загрузка неизменённого cfg пропускается, изменённый копируется на место без перевыделения — остаётся только гонка на уровне отдельных строк при реальной смене cfg на принтере (так было и в upstream). Полное решение — `shared_ptr`-снимки таблиц.

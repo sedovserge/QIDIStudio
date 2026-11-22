@@ -268,6 +268,7 @@ public:
     std::vector<Filament> m_filamentConfig; // 所有的数据，index是filament的编号
     std::vector<std::string> m_vendorNames;         // vendor_list: index -> vendor name
     std::vector<std::string> m_colorHexByIndex;     // colordict: index -> hex color
+    std::string m_lastFilamentCfgBody;              // last officiall_filas_list.cfg applied from Moonraker (guarded by m_config_mtx)
     bool m_auto_read_rfid{ false };             // 插入时自动更新
     bool m_init_detect{ false };                // 开机时检测
     bool m_auto_reload_detect{ false };         // 自动续料
