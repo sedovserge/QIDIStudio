@@ -5,6 +5,7 @@ on: [push, pull_request]
 jobs:
   main:    
     strategy:
+      fail-fast: false   # a broken upstream Linux build must not cancel the Windows job
       matrix:
         os: [ubuntu-latest, windows-2022]   # macos-15 removed: upstream deps (Assimp zlib) fail on macOS SDK 15.5
     runs-on: ${{ matrix.os }}
@@ -96,7 +97,8 @@ jobs:
       if: startsWith(matrix.os, 'ubuntu-')
       run: |
           export CMAKE_TLS_VERIFY=0
-          sed -i "s/-DQDT_INTERNAL_TESTING=0/-DQDT_INTERNAL_TESTING=1 -DQDT_RELEASE_TO_PUBLIC=0/" BuildLinux.sh 
+          sed -i "s/-DQDT_RELEASE_TO_PUBLIC=1/-DQDT_RELEASE_TO_PUBLIC=0/" BuildLinux.sh
+          grep -q -- "-DQDT_RELEASE_TO_PUBLIC=0" BuildLinux.sh || { echo "BuildLinux.sh: failed to force QDT_RELEASE_TO_PUBLIC=0"; exit 1; }
           chmod +x BuildLinux.sh
           ./BuildLinux.sh -dsi
 
