@@ -22,6 +22,14 @@
 
 Из upstream после `c58fdc56` переносить только точечные фиксы (`cherry-pick`), не трогающие `QDSDeviceManager`.
 
+### Профиль Q2: без `PRINT_END` в концевом G-code
+
+Upstream 02.07 дописал `PRINT_END` в конец `machine_end_gcode` профиля `Qidi Q2 0.4 nozzle.json` (0.2/0.6/0.8 наследуют его). Это схема прошивки 01.01.02+: там `PRINT_END` вызывается из G-code, а `SDCARD_RESET_FILE` из макроса убран.
+
+На **1.1.1** `PRINT_END` выполняется **после** окончания файла (в логе Klipper: `Finished SD card print` → через ~13 с `SET_IDLE_TIMEOUT`/`M84` из макроса; вызывает его не открытый Klipper/Moonraker, вероятно клиент экрана `makerbase-client`). Макрос заканчивается `SDCARD_RESET_FILE`, поэтому вызов из G-code обрывает печать: `!! SDCARD_RESET_FILE cannot be run from the sdcard` → `CANCEL_PRINT`, статус `error`.
+
+В форке строка `PRINT_END` убрана, версия набора в `resources/profiles/Q Series.json` поднята (`02.07.02.60` → `02.07.02.61`). Без повышения версии студия не перекопирует профили в `%APPDATA%\QIDIStudio\system\` (см. `PresetUpdater::check_installed_vendor_profiles()`). При обновлении upstream: проверить, что `PRINT_END` не вернулся, и что версия набора выше версии upstream. `SET_PRINT_MAIN_STATUS` на 1.1.1 неизвестна, но Klipper её просто игнорирует.
+
 ---
 
 ## TL;DR — что и зачем
