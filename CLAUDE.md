@@ -46,6 +46,7 @@ Upstream 02.07 дописал `PRINT_END` в конец `machine_end_gcode` пр
 | 2 | `17504bd` → `4f4bad2` | Guard от затирания пустыми данными + проверки границ + возврат записи в `m_filamentConfig` | `QDSDeviceManager.cpp` |
 | 3 | `ee7c83d` + `2d03867` → `970a1d8` + `68d7791` | cfg с принтера через Moonraker (в 02.07 без этого Box вообще не заполняется) | `QDSDeviceManager.cpp` + `.hpp` |
 | 4 | `a162f8c` → `6995187` | Шифрование логов мешало диагностике | `Utils.hpp` |
+| 5 | — (только 02.07) | Охлаждение после смены прутка считалось по прутку из слота 1 (`TOOL_CHANGE_END` → T0) | `GCodeEditor.cpp` |
 
 ---
 
@@ -199,6 +200,26 @@ updateFilamentConfig: loaded from Moonraker OK
 ### Примечание
 
 Это удобство разработчика, не функциональный фикс. Можно не переносить при апстриме если лень.
+
+---
+
+## Фикс 5: охлаждение по чужому прутку после смены (`TOOL_CHANGE_END` → T0)
+
+### Проблема
+
+`GCodeEditor::parse_layer_gcode()` считает сменой инструмента любую строку, начинающуюся с `toolchange_prefix()` (для Klipper — `T`), и берёт номер через `atoi`. В `change_filament_gcode` профилей Q2, Q2C, X-Max 4, X-Plus 4, X-Plus 5 смена выглядит как `TOOL_CHANGE_START … T<n> … TOOL_CHANGE_END`. Строка `TOOL_CHANGE_END` даёт `atoi("OOL_CHANGE_END") = 0` → «T0». После первой смены прутка до конца печати обдув, вспомогательный вентилятор, замедление (`EXTRUDER_CONFIG(...)`) считаются по прутку 0 (слот 1), даже если он в детали не используется.
+
+Пример (2026-11-25): деталь из NIT PETG (слоты 2/3, обдув 0/0), в слоте 1 KREMEN PETG (40–90 %). В G-code сразу после `TOOL_CHANGE_END` — `M106 S102` (40 %, `fan_min_speed` KREMEN) и `M106 P2 S25` (доп. вентилятор KREMEN), дальше 57–76 %. NIT в слоте 1 → обдув 0.
+
+История upstream: `0c78224f` (2025-09-17) исключение `starts_with("TOOL_CHANGE")` закрывало оба макроса; `8ce31ed7` (2025-11-25, «fix some bug») сузил до `"TOOL_CHANGE_START"` — регрессия. Есть в `upstream/main` (2026-11-05). Тот же симптом — issue QIDITECH/QIDIStudio#125 (закрыт 2025-10-27 с ответом «влияет только на превью», что неверно). Превью и оценку времени не затрагивает: `GCodeProcessor::process_T` нечисловой номер отбрасывает.
+
+### Фикс
+
+Сменой инструмента считать только `<prefix><цифра>`: добавлены `std::isdigit(static_cast<unsigned char>(sline[prefix.size()]))` и `#include <cctype>`. Ветки `TOOL_CHANGE_START` (`y71`) и `TIMELAPSE_TAKE_FRAME` (`y72`) оставлены для совместимости с upstream. `T 1` с пробелом больше не распознаётся (студия так не пишет).
+
+### При обновлении upstream
+
+Проверить, что условие с `isdigit` осталось в ветке toolchange в `parse_layer_gcode()`. Проверка: деталь из прутков слотов 2+, в слоте 1 другой профиль с ненулевым обдувом → после `TOOL_CHANGE_END` не должно быть `M106` с его значениями.
 
 ---
 
