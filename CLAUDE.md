@@ -211,7 +211,7 @@ updateFilamentConfig: loaded from Moonraker OK
 
 Пример (2026-11-25): деталь из NIT PETG (слоты 2/3, обдув 0/0), в слоте 1 KREMEN PETG (40–90 %). В G-code сразу после `TOOL_CHANGE_END` — `M106 S102` (40 %, `fan_min_speed` KREMEN) и `M106 P2 S25` (доп. вентилятор KREMEN), дальше 57–76 %. NIT в слоте 1 → обдув 0.
 
-История upstream: `0c78224f` (2025-09-17) исключение `starts_with("TOOL_CHANGE")` закрывало оба макроса; `8ce31ed7` (2025-11-25, «fix some bug») сузил до `"TOOL_CHANGE_START"` — регрессия. Есть в `upstream/main` (2026-11-05). Тот же симптом — issue QIDITECH/QIDIStudio#125 (закрыт 2025-10-27 с ответом «влияет только на превью», что неверно). Превью и оценку времени не затрагивает: `GCodeProcessor::process_T` нечисловой номер отбрасывает.
+История upstream: `0c78224f` (2025-09-17) исключение `starts_with("TOOL_CHANGE")` закрывало оба макроса; `8ce31ed7` (2025-11-25, «fix some bug») сузил до `"TOOL_CHANGE_START"` — регрессия. Есть в `upstream/main` (2026-11-05). Тот же симптом — issue QIDITECH/QIDIStudio#125 (закрыт 2025-10-27 с ответом «влияет только на превью», что неверно). Наш отчёт с доказательствами и фиксом: https://github.com/QIDITECH/QIDIStudio/issues/271 (2026-11-27), PR с тем же фиксом на `upstream/main`: https://github.com/QIDITECH/QIDIStudio/pull/272 (ветка форка `fix/toolchange-end-cooling`). Превью и оценку времени не затрагивает: `GCodeProcessor::process_T` нечисловой номер отбрасывает.
 
 ### Фикс
 
@@ -219,7 +219,7 @@ updateFilamentConfig: loaded from Moonraker OK
 
 ### При обновлении upstream
 
-Проверить, что условие с `isdigit` осталось в ветке toolchange в `parse_layer_gcode()`. Проверка: деталь из прутков слотов 2+, в слоте 1 другой профиль с ненулевым обдувом → после `TOOL_CHANGE_END` не должно быть `M106` с его значениями.
+Проверить статус #271 / #272 и что условие с `isdigit` (или эквивалентный фикс upstream) осталось в ветке toolchange в `parse_layer_gcode()`. Проверка: деталь из прутков слотов 2+, в слоте 1 другой профиль с ненулевым обдувом → после `TOOL_CHANGE_END` не должно быть `M106` с его значениями.
 
 ---
 
